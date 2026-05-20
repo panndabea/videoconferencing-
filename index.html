@@ -212,7 +212,9 @@
   <body>
     <main>
       <h1>Local Video Conference</h1>
-      <p class="subtitle">Private browser-to-browser video calls using URL fragment handoff only.</p>
+      <p class="subtitle">
+        Private browser-to-browser video calls using URL fragment hand-off only (without STUN/TURN this works best on direct/local connectivity).
+      </p>
 
       <div class="status-row" aria-live="polite">
         <span class="badge" id="statusBadge" data-state="preparing">Status: preparing</span>
@@ -279,6 +281,10 @@
           hangupBtn: document.getElementById('hangupBtn')
         };
 
+        const MAX_SAFE_URL_LENGTH = 1900;
+        const ICE_GATHERING_TIMEOUT_MS = 15000;
+        const MAX_SDP_LENGTH = 50000; // Typical SDP is much smaller; this guards against oversized malformed links.
+
         let pc;
         let localStream;
         let remoteStream;
@@ -300,8 +306,7 @@
               setNotice('URL copied to clipboard.');
             } catch {
               ui.currentUrl.select();
-              document.execCommand('copy');
-              setNotice('URL copied (fallback copy).');
+              setNotice('Clipboard permission was blocked. Select and copy the URL manually.');
             }
           });
 
@@ -317,7 +322,7 @@
 
           ui.muteBtn.addEventListener('click', () => {
             if (!localStream) return;
-            const enabled = !localStream.getAudioTracks().every((track) => track.enabled === false);
+            const enabled = localStream.getAudioTracks().some((track) => track.enabled);
             localStream.getAudioTracks().forEach((track) => {
               track.enabled = !enabled;
             });
@@ -327,7 +332,7 @@
 
           ui.cameraBtn.addEventListener('click', () => {
             if (!localStream) return;
-            const enabled = !localStream.getVideoTracks().every((track) => track.enabled === false);
+            const enabled = localStream.getVideoTracks().some((track) => track.enabled);
             localStream.getVideoTracks().forEach((track) => {
               track.enabled = !enabled;
             });
@@ -466,12 +471,12 @@
             throw new Error('Please paste the return URL first.');
           }
 
-          let payload = '';
+          let payload;
           try {
             const parsed = new URL(text);
-            payload = new URLSearchParams(parsed.hash.slice(1)).get('answer') || '';
+            payload = new URLSearchParams(parsed.hash.slice(1)).get('answer');
           } catch {
-            payload = new URLSearchParams(text.replace(/^#/, '')).get('answer') || '';
+            payload = new URLSearchParams(text.replace(/^#/, '')).get('answer');
           }
 
           if (!payload) {
@@ -490,7 +495,7 @@
           if (!pc || !pc.localDescription || pc.localDescription.type !== 'offer') {
             setStatus('waiting', 'This return URL should be sent back to the call creator.');
             ui.guidanceText.textContent =
-              'This link completes someone else\'s call setup. Please send it back to the person who created the invite.';
+              "This link completes someone else's call setup. Please send it back to the person who created the invite.";
             setStepState(3);
             return;
           }
@@ -512,7 +517,7 @@
         }
 
         function warnIfLongUrl(url) {
-          if (url.length > 1900) {
+          if (url.length > MAX_SAFE_URL_LENGTH) {
             setNotice('Warning: this link is very long and may be hard to share in some apps.', 'warn');
           }
         }
@@ -551,12 +556,17 @@
 
         async function decodeSessionDescription(encoded) {
           const [prefix, payload] = encoded.includes('.') ? encoded.split('.', 2) : ['u', encoded];
+          if (!payload || (prefix !== 'u' && prefix !== 'c')) {
+            throw new Error('The provided call link appears invalid.');
+          }
           const bytes = fromBase64Url(payload);
           let decoded = bytes;
 
           if (prefix === 'c') {
             if (!window.DecompressionStream) {
-              throw new Error('This link uses compression and requires a browser with DecompressionStream support.');
+              throw new Error(
+                'This link uses compression. Please use a modern browser or ask the sender to create a new call link.'
+              );
             }
             decoded = await streamToUint8Array(
               new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))
@@ -568,14 +578,14 @@
           if (!parsed || (parsed.type !== 'offer' && parsed.type !== 'answer') || typeof parsed.sdp !== 'string') {
             throw new Error('The provided call link appears invalid.');
           }
+          if (!parsed.sdp || parsed.sdp.length > MAX_SDP_LENGTH) {
+            throw new Error('The provided call link is too large to process safely.');
+          }
           return parsed;
         }
 
         function toBase64Url(bytes) {
-          let binary = '';
-          bytes.forEach((byte) => {
-            binary += String.fromCharCode(byte);
-          });
+          const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('');
           return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
         }
 
@@ -584,7 +594,7 @@
           const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
           const binary = atob(padded);
           const bytes = new Uint8Array(binary.length);
-          for (let i = 0; i < binary.length; i += 1) {
+          for (let i = 0; i < binary.length; i++) {
             bytes[i] = binary.charCodeAt(i);
           }
           return bytes;
@@ -604,7 +614,7 @@
             const timeoutId = setTimeout(() => {
               connection.removeEventListener('icegatheringstatechange', onStateChange);
               reject(new Error('Timed out while preparing the call link. Please try again.'));
-            }, 15000);
+            }, ICE_GATHERING_TIMEOUT_MS);
 
             function onStateChange() {
               if (connection.iceGatheringState === 'complete') {
