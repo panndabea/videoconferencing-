@@ -1,0 +1,650 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Local Video Conference</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #10131a;
+        --card: #171c26;
+        --muted: #8f9bb3;
+        --text: #edf2ff;
+        --border: #283246;
+        --accent: #4f8cff;
+        --danger: #ff6b6b;
+        --ok: #2dd4bf;
+        --warn: #fbbf24;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+        background: radial-gradient(circle at top, #1a2233 0%, var(--bg) 60%);
+        color: var(--text);
+        display: grid;
+        place-items: center;
+        padding: 1rem;
+      }
+
+      main {
+        width: min(980px, 100%);
+        background: color-mix(in srgb, var(--card) 92%, black);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 1rem;
+        box-shadow: 0 18px 60px rgba(0, 0, 0, 0.35);
+      }
+
+      h1 {
+        margin: 0 0 0.25rem;
+        font-size: 1.4rem;
+      }
+
+      .subtitle {
+        margin: 0 0 1rem;
+        color: var(--muted);
+      }
+
+      .status-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.75rem;
+        align-items: center;
+        margin-bottom: 0.75rem;
+      }
+
+      .badge {
+        padding: 0.35rem 0.65rem;
+        border-radius: 999px;
+        border: 1px solid var(--border);
+        font-size: 0.85rem;
+        color: var(--muted);
+      }
+
+      .badge[data-state='connected'] {
+        color: var(--ok);
+        border-color: color-mix(in srgb, var(--ok) 55%, var(--border));
+      }
+
+      .badge[data-state='failed'] {
+        color: var(--danger);
+        border-color: color-mix(in srgb, var(--danger) 55%, var(--border));
+      }
+
+      ol.steps {
+        margin: 0;
+        padding-left: 1.2rem;
+        color: var(--muted);
+      }
+
+      .steps li {
+        margin: 0.25rem 0;
+      }
+
+      .steps li.done {
+        color: var(--ok);
+      }
+
+      .steps li.active {
+        color: var(--text);
+      }
+
+      .panel {
+        margin-top: 1rem;
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 0.75rem;
+        background: #111724;
+      }
+
+      .panel p {
+        margin: 0 0 0.55rem;
+      }
+
+      .url-box {
+        width: 100%;
+        min-height: 4.5rem;
+        resize: vertical;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: #0d1220;
+        color: var(--text);
+        padding: 0.65rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 0.9rem;
+      }
+
+      .controls,
+      .input-row {
+        margin-top: 0.65rem;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+      }
+
+      button,
+      input[type='url'] {
+        border-radius: 10px;
+        border: 1px solid var(--border);
+        background: #0f1626;
+        color: var(--text);
+        padding: 0.6rem 0.8rem;
+        font: inherit;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      button:hover {
+        border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+      }
+
+      button.primary {
+        background: color-mix(in srgb, var(--accent) 25%, #0f1626);
+        border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+      }
+
+      button.danger {
+        border-color: color-mix(in srgb, var(--danger) 50%, var(--border));
+      }
+
+      #answerInput {
+        flex: 1 1 360px;
+      }
+
+      .notice {
+        margin-top: 0.55rem;
+        color: var(--muted);
+      }
+
+      .notice.warn {
+        color: var(--warn);
+      }
+
+      .notice.error {
+        color: var(--danger);
+      }
+
+      .videos {
+        margin-top: 1rem;
+        display: grid;
+        gap: 0.75rem;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .video-card {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        background: #0d1220;
+        padding: 0.5rem;
+      }
+
+      .video-card h2 {
+        margin: 0 0 0.45rem;
+        font-size: 0.95rem;
+        color: var(--muted);
+      }
+
+      video {
+        width: 100%;
+        border-radius: 8px;
+        border: 1px solid #1f2b42;
+        background: black;
+        aspect-ratio: 16 / 10;
+        object-fit: cover;
+      }
+
+      @media (max-width: 780px) {
+        .videos {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Local Video Conference</h1>
+      <p class="subtitle">Private browser-to-browser video calls using URL fragment handoff only.</p>
+
+      <div class="status-row" aria-live="polite">
+        <span class="badge" id="statusBadge" data-state="preparing">Status: preparing</span>
+      </div>
+
+      <ol class="steps" id="steps">
+        <li data-step="1">Create invite link</li>
+        <li data-step="2">Send link</li>
+        <li data-step="3">Receive return link</li>
+        <li data-step="4">Connected</li>
+      </ol>
+
+      <section class="panel" aria-label="Share link">
+        <p id="guidanceText">Preparing your local media…</p>
+        <textarea class="url-box" id="currentUrl" readonly aria-label="Current sharable URL"></textarea>
+        <div class="controls">
+          <button id="copyUrlBtn" class="primary" type="button">Copy current URL</button>
+          <button id="newCallBtn" type="button">Start new call</button>
+        </div>
+        <div class="input-row" id="answerRow">
+          <input id="answerInput" type="url" placeholder="Paste return URL here" autocomplete="off" />
+          <button id="applyAnswerBtn" type="button">Apply return URL</button>
+        </div>
+        <div id="notice" class="notice" role="status" aria-live="polite"></div>
+      </section>
+
+      <section class="panel" aria-label="Call controls">
+        <div class="controls">
+          <button id="muteBtn" type="button">Mute microphone</button>
+          <button id="cameraBtn" type="button">Turn camera off</button>
+          <button id="hangupBtn" type="button" class="danger">Hang up</button>
+        </div>
+      </section>
+
+      <section class="videos" aria-label="Video streams">
+        <article class="video-card">
+          <h2>Your video</h2>
+          <video id="localVideo" autoplay playsinline muted></video>
+        </article>
+        <article class="video-card">
+          <h2>Other person</h2>
+          <video id="remoteVideo" autoplay playsinline></video>
+        </article>
+      </section>
+    </main>
+
+    <script>
+      (() => {
+        const ui = {
+          statusBadge: document.getElementById('statusBadge'),
+          steps: Array.from(document.querySelectorAll('#steps li')),
+          guidanceText: document.getElementById('guidanceText'),
+          currentUrl: document.getElementById('currentUrl'),
+          copyUrlBtn: document.getElementById('copyUrlBtn'),
+          newCallBtn: document.getElementById('newCallBtn'),
+          answerRow: document.getElementById('answerRow'),
+          answerInput: document.getElementById('answerInput'),
+          applyAnswerBtn: document.getElementById('applyAnswerBtn'),
+          notice: document.getElementById('notice'),
+          localVideo: document.getElementById('localVideo'),
+          remoteVideo: document.getElementById('remoteVideo'),
+          muteBtn: document.getElementById('muteBtn'),
+          cameraBtn: document.getElementById('cameraBtn'),
+          hangupBtn: document.getElementById('hangupBtn')
+        };
+
+        let pc;
+        let localStream;
+        let remoteStream;
+
+        if (!window.RTCPeerConnection || !navigator.mediaDevices?.getUserMedia) {
+          setStatus('failed', 'This browser does not support browser-to-browser video calls here.');
+          ui.guidanceText.textContent = 'Please use a recent browser that supports WebRTC and media capture.';
+          ui.answerRow.hidden = true;
+          return;
+        }
+
+        bindUi();
+        init().catch(handleError);
+
+        function bindUi() {
+          ui.copyUrlBtn.addEventListener('click', async () => {
+            try {
+              await navigator.clipboard.writeText(location.href);
+              setNotice('URL copied to clipboard.');
+            } catch {
+              ui.currentUrl.select();
+              document.execCommand('copy');
+              setNotice('URL copied (fallback copy).');
+            }
+          });
+
+          ui.newCallBtn.addEventListener('click', () => {
+            cleanupPeer();
+            history.replaceState(null, '', location.pathname);
+            init().catch(handleError);
+          });
+
+          ui.applyAnswerBtn.addEventListener('click', () => {
+            applyAnswerFromText(ui.answerInput.value.trim()).catch(handleError);
+          });
+
+          ui.muteBtn.addEventListener('click', () => {
+            if (!localStream) return;
+            const enabled = !localStream.getAudioTracks().every((track) => track.enabled === false);
+            localStream.getAudioTracks().forEach((track) => {
+              track.enabled = !enabled;
+            });
+            ui.muteBtn.textContent = enabled ? 'Unmute microphone' : 'Mute microphone';
+            setNotice(enabled ? 'Microphone muted.' : 'Microphone unmuted.');
+          });
+
+          ui.cameraBtn.addEventListener('click', () => {
+            if (!localStream) return;
+            const enabled = !localStream.getVideoTracks().every((track) => track.enabled === false);
+            localStream.getVideoTracks().forEach((track) => {
+              track.enabled = !enabled;
+            });
+            ui.cameraBtn.textContent = enabled ? 'Turn camera on' : 'Turn camera off';
+            setNotice(enabled ? 'Camera turned off.' : 'Camera turned on.');
+          });
+
+          ui.hangupBtn.addEventListener('click', () => {
+            cleanupPeer(true);
+            setStatus('failed', 'Call ended.');
+            setStepState(1);
+            ui.answerRow.hidden = false;
+            ui.guidanceText.textContent = 'Call ended. Click “Start new call” to create a fresh link.';
+          });
+
+          window.addEventListener('hashchange', () => {
+            if (location.hash.includes('answer=')) {
+              applyAnswerFromHash().catch(handleError);
+            }
+          });
+        }
+
+        async function init() {
+          setNotice('');
+          setStatus('preparing', 'Preparing camera and microphone access…');
+          await ensureMedia();
+          ensurePeer();
+
+          const hash = parseHash();
+          if (hash.answer) {
+            ui.answerRow.hidden = true;
+            await applyAnswerFromHash();
+            return;
+          }
+
+          if (hash.join) {
+            ui.answerRow.hidden = true;
+            await answerJoinLink(hash.join);
+            return;
+          }
+
+          ui.answerRow.hidden = false;
+          await createInviteLink();
+        }
+
+        function parseHash() {
+          const params = new URLSearchParams(location.hash.startsWith('#') ? location.hash.slice(1) : '');
+          return {
+            join: params.get('join'),
+            answer: params.get('answer')
+          };
+        }
+
+        async function ensureMedia() {
+          if (localStream) return;
+          try {
+            localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            ui.localVideo.srcObject = localStream;
+          } catch (error) {
+            throw new Error(
+              'Could not access camera/microphone. Please allow access and reload this page to continue.'
+            );
+          }
+        }
+
+        function ensurePeer() {
+          if (pc && pc.signalingState !== 'closed') return;
+          const config = {
+            iceServers: []
+            // Optional STUN server config:
+            // iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+          };
+          pc = new RTCPeerConnection(config);
+          remoteStream = new MediaStream();
+          ui.remoteVideo.srcObject = remoteStream;
+
+          pc.ontrack = (event) => {
+            event.streams[0].getTracks().forEach((track) => remoteStream.addTrack(track));
+          };
+
+          pc.onconnectionstatechange = () => {
+            const state = pc.connectionState;
+            if (state === 'connected') {
+              setStatus('connected', 'Connected.');
+              setStepState(4);
+            } else if (state === 'connecting') {
+              setStatus('connecting', 'Connecting…');
+              setStepState(3);
+            } else if (state === 'failed' || state === 'disconnected') {
+              setStatus('failed', 'Connection failed.');
+            }
+          };
+
+          localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+        }
+
+        async function createInviteLink() {
+          setStatus('preparing', 'Preparing invite link…');
+          setStepState(1);
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          await waitForIceGatheringComplete(pc);
+
+          const encoded = await encodeSessionDescription(pc.localDescription);
+          replaceHash('join', encoded);
+          ui.currentUrl.value = location.href;
+          ui.guidanceText.textContent = 'Copy this URL and send it to the other person.';
+          setStatus('waiting', 'Waiting for return link…');
+          setStepState(2);
+          warnIfLongUrl(location.href);
+        }
+
+        async function answerJoinLink(joinPayload) {
+          setStatus('preparing', 'Preparing return link…');
+          setStepState(2);
+          cleanupPeer();
+          ensurePeer();
+          const offer = await decodeSessionDescription(joinPayload);
+          await pc.setRemoteDescription(offer);
+
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          await waitForIceGatheringComplete(pc);
+
+          const encoded = await encodeSessionDescription(pc.localDescription);
+          replaceHash('answer', encoded);
+          ui.currentUrl.value = location.href;
+          ui.guidanceText.textContent = 'Copy this URL and send it back.';
+          setStatus('waiting', 'Waiting for the creator to connect…');
+          setStepState(3);
+          warnIfLongUrl(location.href);
+        }
+
+        async function applyAnswerFromText(text) {
+          if (!text) {
+            throw new Error('Please paste the return URL first.');
+          }
+
+          let payload = '';
+          try {
+            const parsed = new URL(text);
+            payload = new URLSearchParams(parsed.hash.slice(1)).get('answer') || '';
+          } catch {
+            payload = new URLSearchParams(text.replace(/^#/, '')).get('answer') || '';
+          }
+
+          if (!payload) {
+            throw new Error('The pasted link does not contain a return token.');
+          }
+
+          await setAnswerPayload(payload);
+          replaceHash('answer', payload);
+          ui.currentUrl.value = location.href;
+        }
+
+        async function applyAnswerFromHash() {
+          const payload = parseHash().answer;
+          if (!payload) return;
+          ui.currentUrl.value = location.href;
+          if (!pc || !pc.localDescription || pc.localDescription.type !== 'offer') {
+            setStatus('waiting', 'This return URL should be sent back to the call creator.');
+            ui.guidanceText.textContent =
+              'This link completes someone else\'s call setup. Please send it back to the person who created the invite.';
+            setStepState(3);
+            return;
+          }
+          await setAnswerPayload(payload);
+        }
+
+        async function setAnswerPayload(payload) {
+          setStatus('connecting', 'Applying return link…');
+          setStepState(3);
+          const answer = await decodeSessionDescription(payload);
+          await pc.setRemoteDescription(answer);
+          ui.guidanceText.textContent = 'Connecting to the other person…';
+          setStatus('connecting', 'Connecting…');
+        }
+
+        function replaceHash(key, value) {
+          history.replaceState(null, '', `${location.pathname}#${key}=${value}`);
+          ui.currentUrl.value = location.href;
+        }
+
+        function warnIfLongUrl(url) {
+          if (url.length > 1900) {
+            setNotice('Warning: this link is very long and may be hard to share in some apps.', 'warn');
+          }
+        }
+
+        function setStepState(activeStep) {
+          ui.steps.forEach((li) => {
+            const step = Number(li.dataset.step);
+            li.classList.toggle('done', step < activeStep);
+            li.classList.toggle('active', step === activeStep);
+          });
+        }
+
+        function setStatus(state, text) {
+          ui.statusBadge.dataset.state = state;
+          ui.statusBadge.textContent = `Status: ${state}`;
+          if (text) {
+            ui.guidanceText.textContent = text;
+          }
+        }
+
+        function setNotice(text, kind = '') {
+          ui.notice.textContent = text;
+          ui.notice.className = `notice${kind ? ` ${kind}` : ''}`;
+        }
+
+        async function encodeSessionDescription(desc) {
+          const rawBytes = new TextEncoder().encode(JSON.stringify(desc));
+          if (window.CompressionStream) {
+            const compressed = await streamToUint8Array(
+              new Blob([rawBytes]).stream().pipeThrough(new CompressionStream('gzip'))
+            );
+            return `c.${toBase64Url(compressed)}`;
+          }
+          return `u.${toBase64Url(rawBytes)}`;
+        }
+
+        async function decodeSessionDescription(encoded) {
+          const [prefix, payload] = encoded.includes('.') ? encoded.split('.', 2) : ['u', encoded];
+          const bytes = fromBase64Url(payload);
+          let decoded = bytes;
+
+          if (prefix === 'c') {
+            if (!window.DecompressionStream) {
+              throw new Error('This link uses compression and requires a browser with DecompressionStream support.');
+            }
+            decoded = await streamToUint8Array(
+              new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))
+            );
+          }
+
+          const text = new TextDecoder().decode(decoded);
+          const parsed = JSON.parse(text);
+          if (!parsed || (parsed.type !== 'offer' && parsed.type !== 'answer') || typeof parsed.sdp !== 'string') {
+            throw new Error('The provided call link appears invalid.');
+          }
+          return parsed;
+        }
+
+        function toBase64Url(bytes) {
+          let binary = '';
+          bytes.forEach((byte) => {
+            binary += String.fromCharCode(byte);
+          });
+          return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+        }
+
+        function fromBase64Url(value) {
+          const base64 = value.replace(/-/g, '+').replace(/_/g, '/');
+          const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+          const binary = atob(padded);
+          const bytes = new Uint8Array(binary.length);
+          for (let i = 0; i < binary.length; i += 1) {
+            bytes[i] = binary.charCodeAt(i);
+          }
+          return bytes;
+        }
+
+        async function streamToUint8Array(stream) {
+          const buffer = await new Response(stream).arrayBuffer();
+          return new Uint8Array(buffer);
+        }
+
+        function waitForIceGatheringComplete(connection) {
+          if (connection.iceGatheringState === 'complete') {
+            return Promise.resolve();
+          }
+
+          return new Promise((resolve, reject) => {
+            const timeoutId = setTimeout(() => {
+              connection.removeEventListener('icegatheringstatechange', onStateChange);
+              reject(new Error('Timed out while preparing the call link. Please try again.'));
+            }, 15000);
+
+            function onStateChange() {
+              if (connection.iceGatheringState === 'complete') {
+                clearTimeout(timeoutId);
+                connection.removeEventListener('icegatheringstatechange', onStateChange);
+                resolve();
+              }
+            }
+
+            connection.addEventListener('icegatheringstatechange', onStateChange);
+          });
+        }
+
+        function cleanupPeer(stopLocalTracks = false) {
+          if (pc && pc.signalingState !== 'closed') {
+            pc.ontrack = null;
+            pc.onconnectionstatechange = null;
+            pc.close();
+          }
+          pc = undefined;
+
+          if (remoteStream) {
+            remoteStream.getTracks().forEach((track) => track.stop());
+            remoteStream = undefined;
+          }
+          ui.remoteVideo.srcObject = null;
+
+          if (stopLocalTracks && localStream) {
+            localStream.getTracks().forEach((track) => track.stop());
+            localStream = undefined;
+            ui.localVideo.srcObject = null;
+          }
+        }
+
+        function handleError(error) {
+          const message = error?.message || 'Unexpected error. Please start a new call and try again.';
+          setStatus('failed', message);
+          setNotice(message, 'error');
+        }
+      })();
+    </script>
+  </body>
+</html>
